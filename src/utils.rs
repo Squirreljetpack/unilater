@@ -96,7 +96,14 @@ use demand::Confirm;
 
 #[cfg(not(test))]
 pub fn ask_confirm(prompt: &str, yes_default: bool) -> io::Result<bool> {
-    if std::env::var("SLATER_AUTO").is_ok_and(|v| v.eq_ignore_ascii_case("true")) || ! is_interactive() {
+    if let Ok(auto) = std::env::var("SLATER_AUTO") {
+        if auto.eq_ignore_ascii_case("true") || auto == "1" {
+            return Ok(true);
+        } else if auto.eq_ignore_ascii_case("false") || auto == "0" {
+            return Ok(false);
+        }
+    }
+    if ! is_interactive() {
         return Ok(yes_default);
     }
 
@@ -115,11 +122,22 @@ pub fn ask_confirm(prompt: &str, yes_default: bool) -> io::Result<bool> {
 }
 
 pub fn normalize_path<P: AsRef<Path>>(path_input: P) -> String {
+    normalize_path_with_base(None, path_input)
+}
+
+pub fn normalize_path_with_base<P: AsRef<Path>>(base: Option<&Path>, path_input: P) -> String {
     let path = path_input.as_ref();
     let path = if path.is_absolute() {
         path.to_path_buf()
+    } else if let Some(base_dir) = base {
+        let base_abs = if base_dir.is_absolute() {
+            base_dir.to_path_buf()
+        } else {
+            std::env::current_dir().unwrap_or_default().join(base_dir)
+        };
+        base_abs.join(path)
     } else {
-        std::env::current_dir().unwrap().join(path)
+        std::env::current_dir().unwrap_or_default().join(path)
     };
 
     let components = path.components().peekable();

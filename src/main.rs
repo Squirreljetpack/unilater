@@ -292,7 +292,8 @@ pub fn run(opts: Opts) -> Result<()> {
         let file: ComposeFile = from_variant.deserialize_into(&input_bytes)?;
         let dir = input_path
             .as_ref()
-            .and_then(|p| p.parent());
+            .and_then(|p| p.parent())
+            .map(|p| if p.as_os_str().is_empty() { Path::new(".") } else { p });
 
         let file = process_compose(file, dir)?;
 

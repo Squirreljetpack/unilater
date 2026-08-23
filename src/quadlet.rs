@@ -5,7 +5,7 @@ use serde_json::Value as JsonValue;
 use serde_yaml::Value;
 use std::{collections::HashMap, fs::File, io::{BufRead, BufReader}, path::{Path, PathBuf}, process::Command};
 
-use crate::{utils::{ask_confirm, is_root, normalize_path, systemctl_cmd, which}, formats::{Ini, IniFiles, Section}};
+use crate::{utils::{ask_confirm, is_root, normalize_path, normalize_path_with_base, systemctl_cmd, which}, formats::{Ini, IniFiles, Section}};
 use regex::Regex;
 
 
@@ -168,7 +168,23 @@ pub fn process_compose(mut file: ComposeFile, initial_dir: Option<&Path>) -> Res
             let reader = BufReader::new(file);
             for line in reader.lines() {
                 let line = line?;
-                if let Some((key, value)) = line.split_once('=') {
+                let trimmed = line.trim();
+                if trimmed.is_empty() || trimmed.starts_with('#') {
+                    continue;
+                }
+                if let Some((key, value)) = trimmed.split_once('=') {
+                    let key = key.trim();
+                    let mut value = value.trim();
+                    if (value.starts_with('"') && value.ends_with('"'))
+                        || (value.starts_with('\'') && value.ends_with('\''))
+                    {
+                        if value.len() >= 2 {
+                            value = &value[1..value.len() - 1];
+                        }
+                    } else if let Some((val_part, _)) = value.split_once('#') {
+                        value = val_part.trim();
+                    }
+
                     if let Ok(existing_value) = std::env::var(key) {
                         if ! ask_confirm(
                             &format!(
@@ -211,7 +227,7 @@ pub fn process_compose(mut file: ComposeFile, initial_dir: Option<&Path>) -> Res
                                 let host_path = parts[0];
                                 // Check not a named volume
                                 if host_path.contains('/') || host_path.starts_with('.') {
-                                    let new_volume = format!("{}:{}", normalize_path(host_path), parts[1]);
+                                    let new_volume = format!("{}:{}", normalize_path_with_base(initial_dir, host_path), parts[1]);
                                     *volume = Value::String(new_volume);
                                     log::debug!(
                                         "Volume path '{}' replaced with '{}'",
@@ -229,7 +245,7 @@ pub fn process_compose(mut file: ComposeFile, initial_dir: Option<&Path>) -> Res
                 match env_file_val.clone() {
                     Value::String(s) => {
                         if s.contains('/') || s.starts_with('.') {
-                            let new_path = normalize_path(&s);
+                            let new_path = normalize_path_with_base(initial_dir, &s);
                             *env_file_val = Value::String(new_path);
                             log::debug!("env_file '{}' replaced with '{}'", s, env_file_val.as_str().unwrap());
                         }
@@ -238,7 +254,7 @@ pub fn process_compose(mut file: ComposeFile, initial_dir: Option<&Path>) -> Res
                         for item in seq.iter_mut() {
                             if let Some(s) = item.clone().as_str() {
                                 if s.contains('/') || s.starts_with('.') {
-                                    let new_path = normalize_path(s);
+                                    let new_path = normalize_path_with_base(initial_dir, s);
                                     *item = Value::String(new_path.clone());
                                     log::debug!("env_file '{s}' replaced with '{new_path}'");
                                 }
@@ -254,9 +270,11 @@ pub fn process_compose(mut file: ComposeFile, initial_dir: Option<&Path>) -> Res
     Ok(file)
 }
 
+pub const QUADLET_DELIMITER: &str = "\n---\n\n";
+
 fn parse_raw_quadlets(output: &str) -> Result<IniFiles> {
     let mut units = IniFiles::new();
-    for block in output.split("\n---\n\n") {
+    for block in output.split(QUADLET_DELIMITER) {
         if let Some((first_line, rest)) = block.split_once('\n') {
             if let Some(stripped) = first_line.strip_prefix("# ") {
                 let key = stripped.trim().to_string();
@@ -272,7 +290,7 @@ fn parse_raw_quadlets(output: &str) -> Result<IniFiles> {
 
 pub fn get_raw_quadlets(filepath: &PathBuf) -> Result<IniFiles> {
     if which("podlet").is_none() {
-        anyhow::bail!("podman command not found. Please install podman.");
+        anyhow::bail!("podlet command not found. Please install podlet.");
     }
 
     let output = Command::new("podlet")

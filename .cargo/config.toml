@@ -1,6 +1,32 @@
 [alias]
-"@test" = ["exec", "-s", "zsh", "cargo insta test --features integration-tests; cargo insta review"]
+# Run integration snapshot tests and review snapshot changes
+"@test" = [
+  "exec",
+  "-s=zsh",
+  "cargo insta test --features integration-tests; cargo insta review"
+]
 
-"@sysd" = "exec cargo run --release ___extras/sysd.tera -f yaml -t systemd -o $HOME/.config/systemd/user/"
+# Generate and install systemd user units from _/extras/sysd.yaml.tera directly into ~/.config/systemd/user/
+# Automatically runs systemd-analyze verify and prompts to reload & enable units.
+"@sysd" = "exec cargo run --release _/extras/sysd.yaml.tera -f yaml -t systemd -o $HOME/.config/systemd/user/"
 
-"@dufs" = "exec PWD=examples cargo run compose.yaml -t quadlet -o outputs"
+# Dry-run systemd generation into _/outputs/ and display a colored git diff
+# against existing units in ~/.config/systemd/user/.
+"@sysd-dry" = [
+  "exec",
+  "-s=zsh",
+  '''
+SLATER_AUTO=false cargo run --release _/extras/sysd.yaml.tera -f yaml -t systemd -o _/outputs
+for f in _/outputs/*(N); do
+  t="$HOME/.config/systemd/user/${f:t}"
+  if [[ -f "$t" ]]; then
+    cmp -s "$t" "$f" || git --no-pager diff --no-index --color "$t" "$f"
+  else
+    git --no-pager diff --no-index --color /dev/null "$f"
+  fi
+done
+''',
+]
+
+# Convert examples/compose.yaml into Podman Quadlet files (.container / .pod) into examples/outputs/
+"@dufs" = "exec cargo run examples/compose.yaml -t quadlet -o examples/outputs"

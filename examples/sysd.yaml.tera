@@ -8,7 +8,7 @@ git_obsidian:
         Description: "Syncs Obsidian"
         {# Requires=, Wants=, Before=, After=, Conflicts=, Condition...= #}
     Service:
-        ExecStart: /bin/zsh -c "$Zdir/subshell/cron.sh; $SSdir/git_obsidian.zsh;"
+        ExecStart: /bin/zsh -c "${Zdir}/subshell/cron.sh; $SSdir/git_obsidian.zsh;"
     Timer:
         OnCalendar: "*:7/15"
 
@@ -47,7 +47,7 @@ make_playlist:
     Unit:
         Description: "Journal reminder"
     Service:
-        ExecStart: 'zsh -c "$SSdir/folder2playlist $HOME/.local/share/osu/files --copy ~/Music/ncmpcpp/osu -o $HOME/Music/ncmpcpp/osu/osu.m3u --multi"'
+        ExecStart: 'zsh -c "${SSdir}/folder2playlist $HOME/.local/share/osu/files --copy ~/Music/ncmpcpp/osu -o $HOME/Music/ncmpcpp/osu/osu.m3u --multi"'
     Timer:
         OnUnitActiveSec: "1w"
 

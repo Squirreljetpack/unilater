@@ -43,34 +43,55 @@ pub fn activate_units(written_files: Vec<PathBuf>) -> anyhow::Result<()> {
     }
     info!("All units passed!");
         
-    if utils::ask_confirm("Activate the new service files? (Ensure your files have been created in the correct directories!)", true)? {
-        
-        let is_root = utils::is_root();
+    let is_root = utils::is_root();
+    let is_in_systemd_dir = written_files.first().and_then(|f| f.parent()).map(|dir| {
+        let dir_str = dir.to_string_lossy();
+        dir_str.contains("systemd/user") || dir_str.contains("systemd/system")
+    }).unwrap_or(false);
 
+    let prompt = if is_in_systemd_dir {
+        "Reload systemd daemon and activate/start the new unit files?".to_string()
+    } else {
+        let out_dir = written_files.first().and_then(|f| f.parent()).map(|p| p.display().to_string()).unwrap_or_default();
+        format!(
+            "Files were written to '{out_dir}' (outside systemd search path). Reload daemon and attempt to activate anyway?"
+        )
+    };
+
+    if utils::ask_confirm(&prompt, is_in_systemd_dir)? {
         systemctl_cmd(is_root).arg("daemon-reload").status()?;
 
         for file in &written_files {
-
-            let file_name = file.file_name().unwrap().to_str().unwrap();
-
-            if file_name.ends_with(".timer") {
-                systemctl_cmd(is_root)
-                    .args(["enable", "--now", file_name])
-                    .status()?;
-            } else if file_name.ends_with(".service") {
-                let service_base = file_name.strip_suffix(".service").unwrap();
-                let timer_exists = written_files.iter().any(|f| {
-                    f.file_name()
-                        .unwrap()
-                        .to_str()
-                        .map(|n| n == format!("{service_base}.timer"))
-                        .unwrap_or(false)
-                });
-
-                if !timer_exists {
+            if let Some(file_name) = file.file_name().and_then(|n| n.to_str()) {
+                if file_name.ends_with(".timer") {
                     systemctl_cmd(is_root)
                         .args(["enable", "--now", file_name])
                         .status()?;
+                } else if file_name.ends_with(".service") {
+                    let service_base = file_name.strip_suffix(".service").unwrap_or(file_name);
+                    let timer_exists = written_files.iter().any(|f| {
+                        f.file_name()
+                            .and_then(|n| n.to_str())
+                            .map(|n| n == format!("{service_base}.timer"))
+                            .unwrap_or(false)
+                    });
+
+                    if !timer_exists {
+                        let has_install_section = fs::read_to_string(file)
+                            .map(|content| content.contains("[Install]"))
+                            .unwrap_or(false);
+
+                        if has_install_section {
+                            systemctl_cmd(is_root)
+                                .args(["enable", "--now", file_name])
+                                .status()?;
+                        } else {
+                            info!("Unit '{file_name}' has no [Install] section; starting without enabling.");
+                            systemctl_cmd(is_root)
+                                .args(["start", file_name])
+                                .status()?;
+                        }
+                    }
                 }
             }
         }
